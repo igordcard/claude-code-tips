@@ -28,7 +28,6 @@ Here are my tips for getting the most out of Claude Code, including a custom sta
 - [Tip 16: Git worktrees for parallel branch work](#tip-16-git-worktrees-for-parallel-branch-work)
 - [Tip 17: Manual exponential backoff for long-running jobs](#tip-17-manual-exponential-backoff-for-long-running-jobs)
 - [Tip 18: Claude Code as a writing assistant](#tip-18-claude-code-as-a-writing-assistant)
-- [Tip 19: Markdown is the s**t](#tip-19-markdown-is-the-st)
 - [Tip 20: Use Notion to preserve links when pasting](#tip-20-use-notion-to-preserve-links-when-pasting)
 - [Tip 21: Containers for long-running risky tasks](#tip-21-containers-for-long-running-risky-tasks)
 - [Tip 22: The best way to get better at using Claude Code is by using it](#tip-22-the-best-way-to-get-better-at-using-claude-code-is-by-using-it)
