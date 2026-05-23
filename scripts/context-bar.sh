@@ -28,6 +28,33 @@ model=$(echo "$input" | jq -r '.model.display_name // .model.id // "?"')
 cwd=$(echo "$input" | jq -r '.cwd // empty')
 dir=$(basename "$cwd" 2>/dev/null || echo "?")
 
+# Read cached rate limit utilization (written by Stop hook via fetch-usage.sh)
+usage_display=""
+usage_cache="$HOME/.claude/.usage-cache.json"
+if [[ -f "$usage_cache" ]]; then
+    util_5h=$(jq -r '.util_5h // empty' "$usage_cache" 2>/dev/null)
+    util_7d=$(jq -r '.util_7d // empty' "$usage_cache" 2>/dev/null)
+    if [[ -n "$util_5h" && -n "$util_7d" ]]; then
+        pct_5h=$(awk "BEGIN {printf \"%d\", $util_5h * 100}")
+        pct_7d=$(awk "BEGIN {printf \"%d\", $util_7d * 100}")
+        usage_display="5h:${pct_5h}% 7d:${pct_7d}%"
+    fi
+fi
+
+# Cache timer: when does the 1h prompt cache TTL expire?
+cache_status=""
+ws_key=$(printf '%s' "${cwd:-$PWD}" | md5 | cut -c1-8)
+ts_file="$HOME/.claude/.cache-ts-$ws_key"
+if [[ -f "$ts_file" ]]; then
+    last=$(cat "$ts_file" 2>/dev/null)
+    due=$((last + 3600))
+    if [[ "$(date +%s)" -ge "$due" ]]; then
+        cache_status="cache expired"
+    else
+        cache_status="cache due $(date -r "$due" +%H:%M:%S)"
+    fi
+fi
+
 # Get git branch, uncommitted file count, and sync status
 branch=""
 git_status=""
@@ -127,11 +154,16 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
 
     if [[ "$context_length" -gt 0 ]]; then
         pct=$((context_length * 100 / max_context))
-        pct_prefix=""
+        cur_k=$((context_length / 1000))
+        if [[ $cur_k -ge 1000 ]]; then
+            cur_display="$((cur_k / 1000))M"
+        else
+            cur_display="${cur_k}k"
+        fi
     else
         # At conversation start, ~20k baseline is already loaded
         pct=$((baseline * 100 / max_context))
-        pct_prefix="~"
+        cur_display="~$((baseline / 1000))k"
     fi
 
     [[ $pct -gt 100 ]] && pct=100
@@ -149,13 +181,14 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
         fi
     done
 
-    ctx="${bar} ${C_GRAY}${pct_prefix}${pct}% of ${max_display} tokens"
+    ctx="${bar} ${C_GRAY}${cur_display}/${max_display} tokens"
 else
     # Transcript not available yet - show baseline estimate
     baseline=20000
     bar_width=10
     pct=$((baseline * 100 / max_context))
     [[ $pct -gt 100 ]] && pct=100
+    cur_display="~$((baseline / 1000))k"
 
     bar=""
     for ((i=0; i<bar_width; i++)); do
@@ -170,13 +203,16 @@ else
         fi
     done
 
-    ctx="${bar} ${C_GRAY}~${pct}% of ${max_display} tokens"
+    ctx="${bar} ${C_GRAY}${cur_display}/${max_display} tokens"
 fi
 
-# Build output: Model | Dir | Branch (uncommitted) | Context
+# Build output: Model | Dir | Branch (uncommitted) | Context | Cache
 output="${C_ACCENT}${model}${C_GRAY} | 📁${dir}"
 [[ -n "$branch" ]] && output+=" | 🔀${branch} ${git_status}"
-output+=" | ${ctx}${C_RESET}"
+output+=" | ${ctx}"
+[[ -n "$cache_status" ]] && output+=" | ${cache_status}"
+[[ -n "$usage_display" ]] && output+=" | ${usage_display}"
+output+="${C_RESET}"
 
 printf '%b\n' "$output"
 
@@ -185,7 +221,9 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
     # Calculate visible length (without ANSI codes) - 10 chars for bar + content
     plain_output="${model} | 📁${dir}"
     [[ -n "$branch" ]] && plain_output+=" | 🔀${branch} ${git_status}"
-    plain_output+=" | xxxxxxxxxx ${pct}% of ${max_display} tokens"
+    plain_output+=" | xxxxxxxxxx ${cur_display}/${max_display} tokens"
+    [[ -n "$cache_status" ]] && plain_output+=" | ${cache_status}"
+    [[ -n "$usage_display" ]] && plain_output+=" | ${usage_display}"
     max_len=${#plain_output}
     last_user_msg=$(jq -rs '
         # Messages to skip (not useful as context)
